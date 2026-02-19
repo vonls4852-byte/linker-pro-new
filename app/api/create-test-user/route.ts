@@ -3,7 +3,7 @@ import { saveUser } from '../../lib/kv';
 import bcrypt from 'bcryptjs';
 import { User } from '../../types';
 
-export async function POST() {
+export async function GET() {
   try {
     const testUser: User = {
       id: Date.now().toString(),
@@ -44,11 +44,13 @@ export async function POST() {
       }
     };
 
+    console.log('🚀 Начинаем создание тестового пользователя...');
     await saveUser(testUser);
+    console.log('✅ Тестовый пользователь создан!');
     
     return NextResponse.json({
       success: true,
-      message: '✅ Тестовый пользователь создан через POST!',
+      message: '✅ Тестовый пользователь создан!',
       user: {
         nickname: testUser.nickname,
         phone: testUser.phone,
@@ -57,7 +59,7 @@ export async function POST() {
       }
     });
   } catch (error) {
-    console.error('Error creating test user:', error);
+    console.error('❌ Ошибка создания тестового пользователя:', error);
     return NextResponse.json({
       success: false,
       error: String(error)
