@@ -7,7 +7,6 @@ export async function POST(request: Request) {
   try {
     console.log('🔵 API /api/auth вызван');
     
-    // Получаем тело запроса
     const body = await request.json();
     console.log('📥 Тело запроса:', body);
 
@@ -107,15 +106,18 @@ export async function POST(request: Request) {
 
       // Ищем пользователя
       if (phone) {
+        console.log('Поиск по телефону:', phone);
         user = await getUserByPhone(phone);
       } else if (nickname) {
+        console.log('Поиск по никнейму:', nickname);
         user = await getUserByNickname(nickname);
       } else if (email) {
+        console.log('Поиск по email:', email);
         user = await getUserByEmail(email);
       }
 
       if (!user) {
-        console.log('❌ Пользователь не найден');
+        console.log('❌ Пользователь не найден в базе');
         return NextResponse.json({
           success: false,
           error: 'Пользователь не найден'
@@ -123,6 +125,7 @@ export async function POST(request: Request) {
       }
 
       console.log('✅ Пользователь найден:', user.nickname);
+      console.log('Проверка пароля...');
 
       // Проверяем пароль
       const isValid = await bcrypt.compare(password, user.password);
@@ -133,6 +136,8 @@ export async function POST(request: Request) {
           error: 'Неверный пароль'
         }, { status: 401 });
       }
+
+      console.log('✅ Пароль верный, вход выполнен');
 
       // Обновляем lastActive
       user.lastActive = Date.now();
@@ -157,7 +162,7 @@ export async function POST(request: Request) {
     console.error('❌ Ошибка сервера:', error);
     return NextResponse.json({
       success: false,
-      error: 'Внутренняя ошибка сервера'
+      error: 'Внутренняя ошибка сервера: ' + (error instanceof Error ? error.message : String(error))
     }, { status: 500 });
   }
 }
