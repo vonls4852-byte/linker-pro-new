@@ -3,7 +3,7 @@ import { saveUser } from '../../lib/kv';
 import bcrypt from 'bcryptjs';
 import { User } from '../../types';
 
-export async function GET() {
+export async function POST() {
   try {
     const testUser: User = {
       id: Date.now().toString(),
@@ -18,7 +18,7 @@ export async function GET() {
       location: null,
       birthday: null,
       gender: null,
-      role: 'user',  // TypeScript теперь понимает, что это конкретное значение
+      role: 'user',
       isTester: false,
       testerSince: null,
       experimentsCount: 0,
@@ -48,7 +48,7 @@ export async function GET() {
     
     return NextResponse.json({
       success: true,
-      message: '✅ Тестовый пользователь создан!',
+      message: '✅ Тестовый пользователь создан через POST!',
       user: {
         nickname: testUser.nickname,
         phone: testUser.phone,
