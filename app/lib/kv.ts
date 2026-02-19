@@ -1,8 +1,11 @@
 import { Redis } from '@upstash/redis';
 import { User, Post, Chat, Message, FriendRequest } from '../types';
 
-// Создаём клиент Redis из переменных окружения Railway
-const redis = Redis.fromEnv();
+// Создаём клиент Redis из REDIS_URL (Railway)
+const redis = new Redis({
+  url: process.env.REDIS_URL || '',
+  token: '' // Railway Redis не требует отдельного токена
+});
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
@@ -206,8 +209,7 @@ export async function searchUsers(query: string): Promise<Partial<User>[]> {
   }
 }
 
-// ==================== ОСТАЛЬНЫЕ ФУНКЦИИ ====================
-// (posts, chats, friends - оставляем как есть, только заменяем kv на redis)
+// ==================== ПОСТЫ ====================
 
 // Сохранить пост
 export async function savePost(post: Post) {
@@ -325,19 +327,267 @@ export async function addComment(postId: string, comment: any): Promise<Post | n
   }
 }
 
-// ==================== ЧАТЫ (кратко, остальное аналогично) ====================
+// ==================== ЧАТЫ ====================
 
 // Сохранить чат
 export async function saveChat(chat: Chat) {
+  log('info', 'Сохранение чата', { chatId: chat.id, participants: chat.participants.length });
   try {
     await redis.set(`chat:${chat.id}`, JSON.stringify(chat));
+    
     for (const participantId of chat.participants) {
       await redis.sadd(`chats:user:${participantId}`, chat.id);
     }
+    
+    log('success', 'Чат сохранён', { chatId: chat.id });
   } catch (error) {
     log('error', 'Ошибка при сохранении чата', { chatId: chat.id, error });
   }
 }
 
-// ==================== ЭКСПОРТЫ ====================
+// Получить чаты пользователя
+export async function getUserChats(userId: string): Promise<Chat[]> {
+  log('debug', 'Получение чатов пользователя', { userId });
+  try {
+    const chatIds = await redis.smembers(`chats:user:${userId}`);
+    const chats = [];
+    
+    for (const id of chatIds) {
+      if (typeof id === 'string') {
+        const chat = await redis.get(`chat:${id}`);
+        if (chat) {
+          const parsed = typeof chat === 'string' ? JSON.parse(chat) : chat;
+          chats.push(parsed as Chat);
+        }
+      }
+    }
+    
+    const sorted = chats.sort((a, b) => {
+      const aTime = a.lastMessage?.createdAt || 0;
+      const bTime = b.lastMessage?.createdAt || 0;
+      return bTime - aTime;
+    });
+    
+    log('success', 'Чаты пользователя получены', { userId, count: sorted.length });
+    return sorted;
+  } catch (error) {
+    log('error', 'Ошибка при получении чатов', { userId, error });
+    return [];
+  }
+}
+
+// Сохранить сообщение
+export async function saveMessage(chatId: string, message: Message) {
+  log('info', 'Сохранение сообщения', { chatId, messageId: message.id });
+  try {
+    const messageId = `msg:${chatId}:${message.id}`;
+    await redis.set(messageId, JSON.stringify(message));
+    await redis.sadd(`messages:chat:${chatId}`, messageId);
+    
+    const chat = await redis.get(`chat:${chatId}`);
+    if (chat) {
+      const chatData = typeof chat === 'string' ? JSON.parse(chat) : chat as Chat;
+      chatData.lastMessage = message;
+      await redis.set(`chat:${chatId}`, JSON.stringify(chatData));
+    }
+    
+    log('success', 'Сообщение сохранено', { chatId, messageId: message.id });
+  } catch (error) {
+    log('error', 'Ошибка при сохранении сообщения', { chatId, error });
+  }
+}
+
+// Получить сообщения чата
+export async function getChatMessages(chatId: string): Promise<Message[]> {
+  log('debug', 'Получение сообщений чата', { chatId });
+  try {
+    const messageIds = await redis.smembers(`messages:chat:${chatId}`);
+    const messages = [];
+    
+    for (const id of messageIds) {
+      if (typeof id === 'string') {
+        const msg = await redis.get(id);
+        if (msg) {
+          const parsed = typeof msg === 'string' ? JSON.parse(msg) : msg;
+          messages.push(parsed as Message);
+        }
+      }
+    }
+    
+    const sorted = messages.sort((a, b) => a.createdAt - b.createdAt);
+    log('success', 'Сообщения чата получены', { chatId, count: sorted.length });
+    return sorted;
+  } catch (error) {
+    log('error', 'Ошибка при получении сообщений', { chatId, error });
+    return [];
+  }
+}
+
+// ==================== ДРУЗЬЯ ====================
+
+// Отправить заявку
+export async function sendFriendRequest(request: FriendRequest) {
+  log('info', 'Отправка заявки в друзья', { 
+    requestId: request.id,
+    from: request.fromUserId,
+    to: request.toUserId 
+  });
+  try {
+    await redis.set(`friend:request:${request.id}`, JSON.stringify(request));
+    await redis.sadd(`friend:requests:to:${request.toUserId}`, request.id);
+    log('success', 'Заявка отправлена', { requestId: request.id });
+  } catch (error) {
+    log('error', 'Ошибка при отправке заявки', { requestId: request.id, error });
+  }
+}
+
+// Получить входящие заявки
+export async function getIncomingRequests(userId: string): Promise<FriendRequest[]> {
+  log('debug', 'Получение входящих заявок', { userId });
+  try {
+    const requestIds = await redis.smembers(`friend:requests:to:${userId}`);
+    const requests = [];
+    
+    for (const id of requestIds) {
+      if (typeof id === 'string') {
+        const req = await redis.get(`friend:request:${id}`);
+        if (req) {
+          const reqData = typeof req === 'string' ? JSON.parse(req) : req as FriendRequest;
+          if (reqData.status === 'pending') requests.push(reqData);
+        }
+      }
+    }
+    
+    log('success', 'Входящие заявки получены', { userId, count: requests.length });
+    return requests;
+  } catch (error) {
+    log('error', 'Ошибка при получении заявок', { userId, error });
+    return [];
+  }
+}
+
+// Принять заявку
+export async function acceptFriendRequest(requestId: string): Promise<FriendRequest | null> {
+  log('info', 'Принятие заявки в друзья', { requestId });
+  try {
+    const request = await redis.get(`friend:request:${requestId}`);
+    if (!request) {
+      log('error', 'Заявка не найдена', { requestId });
+      return null;
+    }
+    
+    const requestData = typeof request === 'string' ? JSON.parse(request) : request as FriendRequest;
+    requestData.status = 'accepted';
+    await redis.set(`friend:request:${requestId}`, JSON.stringify(requestData));
+    
+    await redis.sadd(`friends:user:${requestData.fromUserId}`, requestData.toUserId);
+    await redis.sadd(`friends:user:${requestData.toUserId}`, requestData.fromUserId);
+    
+    log('success', 'Заявка принята', { 
+      requestId,
+      user1: requestData.fromUserId,
+      user2: requestData.toUserId 
+    });
+    
+    return requestData;
+  } catch (error) {
+    log('error', 'Ошибка при принятии заявки', { requestId, error });
+    return null;
+  }
+}
+
+// Отклонить заявку
+export async function rejectFriendRequest(requestId: string): Promise<FriendRequest | null> {
+  log('info', 'Отклонение заявки', { requestId });
+  try {
+    const request = await redis.get(`friend:request:${requestId}`);
+    if (!request) {
+      log('error', 'Заявка не найдена', { requestId });
+      return null;
+    }
+    
+    const requestData = typeof request === 'string' ? JSON.parse(request) : request as FriendRequest;
+    requestData.status = 'rejected';
+    await redis.set(`friend:request:${requestId}`, JSON.stringify(requestData));
+    
+    log('success', 'Заявка отклонена', { requestId });
+    return requestData;
+  } catch (error) {
+    log('error', 'Ошибка при отклонении заявки', { requestId, error });
+    return null;
+  }
+}
+
+// Получить друзей пользователя
+export async function getUserFriends(userId: string): Promise<Partial<User>[]> {
+  log('debug', 'Получение друзей пользователя', { userId });
+  try {
+    const friendIds = await redis.smembers(`friends:user:${userId}`);
+    const friends = [];
+    
+    for (const id of friendIds) {
+      if (typeof id === 'string') {
+        const user = await getUserById(id);
+        if (user) {
+          const { password, ...safeUser } = user;
+          friends.push(safeUser);
+        }
+      }
+    }
+    
+    log('success', 'Друзья получены', { userId, count: friends.length });
+    return friends;
+  } catch (error) {
+    log('error', 'Ошибка при получении друзей', { userId, error });
+    return [];
+  }
+}
+
+// Удалить из друзей
+export async function removeFriend(userId: string, friendId: string) {
+  log('info', 'Удаление из друзей', { userId, friendId });
+  try {
+    await redis.srem(`friends:user:${userId}`, friendId);
+    await redis.srem(`friends:user:${friendId}`, userId);
+    log('success', 'Удалено из друзей', { userId, friendId });
+  } catch (error) {
+    log('error', 'Ошибка при удалении из друзей', { userId, friendId, error });
+  }
+}
+
+// ==================== ОНЛАЙН-СТАТУС ====================
+
+// Обновить активность
+export async function updateLastActive(userId: string) {
+  try {
+    await redis.set(`lastactive:${userId}`, Date.now());
+  } catch (error) {
+    log('error', 'Ошибка при обновлении активности', { userId, error });
+  }
+}
+
+// Получить последнюю активность
+export async function getLastActive(userId: string): Promise<number | null> {
+  try {
+    return await redis.get(`lastactive:${userId}`);
+  } catch (error) {
+    log('error', 'Ошибка при получении активности', { userId, error });
+    return null;
+  }
+}
+
+// Получить онлайн-статус нескольких пользователей
+export async function getOnlineStatus(userIds: string[]): Promise<Record<string, boolean>> {
+  const now = Date.now();
+  const status: Record<string, boolean> = {};
+  
+  for (const userId of userIds) {
+    const lastActive = await getLastActive(userId);
+    status[userId] = lastActive ? (now - lastActive < 5 * 60 * 1000) : false;
+  }
+  
+  return status;
+}
+
+// Экспортируем redis для прямого использования если нужно
 export { redis };
