@@ -5,13 +5,57 @@ import { User, Post, Chat, Message, FriendRequest } from '../types';
 
 // Сохранение пользователя
 export async function saveUser(user: User) {
-  await kv.set(`user:id:${user.id}`, user);
-  await kv.set(`user:nickname:${user.nickname}`, user.id);
-  await kv.set(`user:phone:${user.phone}`, user.id);
-  if (user.email) {
-    await kv.set(`user:email:${user.email}`, user.id);
+  console.log('💾 НАЧАЛО СОХРАНЕНИЯ ПОЛЬЗОВАТЕЛЯ:', {
+    id: user.id,
+    nickname: user.nickname,
+    phone: user.phone,
+    email: user.email
+  });
+
+  try {
+    // Сохраняем по ID
+    await kv.set(`user:id:${user.id}`, user);
+    console.log('✅ user:id сохранён');
+
+    // Сохраняем по никнейму
+    await kv.set(`user:nickname:${user.nickname}`, user.id);
+    console.log('✅ user:nickname сохранён');
+
+    // Сохраняем по телефону
+    await kv.set(`user:phone:${user.phone}`, user.id);
+    console.log('✅ user:phone сохранён');
+
+    // Сохраняем по email (если есть)
+    if (user.email) {
+      await kv.set(`user:email:${user.email}`, user.id);
+      console.log('✅ user:email сохранён');
+    }
+
+    // Добавляем в общий список
+    await kv.sadd('users:all', user.id);
+    console.log('✅ users:all обновлён, добавлен ID:', user.id);
+
+    // Проверяем, что пользователь действительно сохранился
+    const checkUser = await kv.get(`user:id:${user.id}`);
+    if (checkUser) {
+      console.log('🎉 ПРОВЕРКА: пользователь найден по ID!');
+    } else {
+      console.log('❌ ПРОВЕРКА: пользователь НЕ найден по ID!');
+    }
+
+    const checkNickname = await kv.get(`user:nickname:${user.nickname}`);
+    if (checkNickname) {
+      console.log('🎉 ПРОВЕРКА: никнейм найден!');
+    } else {
+      console.log('❌ ПРОВЕРКА: никнейм НЕ найден!');
+    }
+
+    console.log('🎉 СОХРАНЕНИЕ ЗАВЕРШЕНО УСПЕШНО!');
+
+  } catch (error) {
+    console.error('❌ ОШИБКА при сохранении пользователя:', error);
+    throw error;
   }
-  await kv.sadd('users:all', user.id);
 }
 
 // Получение пользователя по ID
@@ -126,16 +170,16 @@ export async function getFeed(userId: string): Promise<Post[]> {
 export async function likePost(postId: string, userId: string): Promise<Post | null> {
   const post = await kv.get(`post:${postId}`);
   if (!post) return null;
-  
+
   const postData = post as Post;
   const likes = postData.likes || [];
-  
+
   if (likes.includes(userId)) {
     postData.likes = likes.filter((id: string) => id !== userId);
   } else {
     postData.likes = [...likes, userId];
   }
-  
+
   await kv.set(`post:${postId}`, postData);
   return postData;
 }
@@ -144,7 +188,7 @@ export async function likePost(postId: string, userId: string): Promise<Post | n
 export async function addComment(postId: string, comment: any): Promise<Post | null> {
   const post = await kv.get(`post:${postId}`);
   if (!post) return null;
-  
+
   const postData = post as Post;
   postData.comments = [...(postData.comments || []), comment];
   await kv.set(`post:${postId}`, postData);
@@ -156,7 +200,7 @@ export async function addComment(postId: string, comment: any): Promise<Post | n
 // Сохранить чат
 export async function saveChat(chat: Chat) {
   await kv.set(`chat:${chat.id}`, chat);
-  
+
   // Добавляем чат каждому участнику
   for (const participantId of chat.participants) {
     await kv.sadd(`chats:user:${participantId}`, chat.id);
@@ -185,7 +229,7 @@ export async function saveMessage(chatId: string, message: Message) {
   const messageId = `msg:${chatId}:${message.id}`;
   await kv.set(messageId, message);
   await kv.sadd(`messages:chat:${chatId}`, messageId);
-  
+
   // Обновляем lastMessage в чате
   const chat = await kv.get(`chat:${chatId}`);
   if (chat) {
@@ -236,15 +280,15 @@ export async function getIncomingRequests(userId: string): Promise<FriendRequest
 export async function acceptFriendRequest(requestId: string): Promise<FriendRequest | null> {
   const request = await kv.get(`friend:request:${requestId}`);
   if (!request) return null;
-  
+
   const requestData = request as FriendRequest;
   requestData.status = 'accepted';
   await kv.set(`friend:request:${requestId}`, requestData);
-  
+
   // Добавляем в друзья обоим
   await kv.sadd(`friends:user:${requestData.fromUserId}`, requestData.toUserId);
   await kv.sadd(`friends:user:${requestData.toUserId}`, requestData.fromUserId);
-  
+
   return requestData;
 }
 
@@ -252,11 +296,11 @@ export async function acceptFriendRequest(requestId: string): Promise<FriendRequ
 export async function rejectFriendRequest(requestId: string): Promise<FriendRequest | null> {
   const request = await kv.get(`friend:request:${requestId}`);
   if (!request) return null;
-  
+
   const requestData = request as FriendRequest;
   requestData.status = 'rejected';
   await kv.set(`friend:request:${requestId}`, requestData);
-  
+
   return requestData;
 }
 
@@ -298,11 +342,11 @@ export async function getLastActive(userId: string): Promise<number | null> {
 export async function getOnlineStatus(userIds: string[]): Promise<Record<string, boolean>> {
   const now = Date.now();
   const status: Record<string, boolean> = {};
-  
+
   for (const userId of userIds) {
     const lastActive = await getLastActive(userId);
     status[userId] = lastActive ? (now - lastActive < 5 * 60 * 1000) : false;
   }
-  
+
   return status;
 }
