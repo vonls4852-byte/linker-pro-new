@@ -3,6 +3,9 @@ import { saveUser } from '../../lib/kv';
 import bcrypt from 'bcryptjs';
 import { User } from '../../types';
 
+// Функция задержки
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function GET() {
   const results: any = {
     timestamp: new Date().toISOString(),
@@ -56,7 +59,11 @@ export async function GET() {
     await saveUser(testUser);
     results.steps.push('Пользователь сохранён через saveUser');
 
-    // Немедленная проверка
+    // Ждём 2 секунды для синхронизации KV
+    results.steps.push('Ожидание 2 секунды для синхронизации...');
+    await delay(2000);
+
+    // Проверяем
     const { getUserByNickname } = await import('../../lib/kv');
     const check = await getUserByNickname('wyratheplug');
     
@@ -65,6 +72,15 @@ export async function GET() {
       id: check.id,
       nickname: check.nickname
     } : { found: false };
+
+    // Попробуем ещё раз через getAllUsers
+    const { getAllUsers } = await import('../../lib/kv');
+    const allUsers = await getAllUsers();
+    results.allUsersCount = allUsers.length;
+    results.allUsers = allUsers.map(u => ({
+      id: u.id,
+      nickname: u.nickname
+    }));
 
     results.success = true;
 
